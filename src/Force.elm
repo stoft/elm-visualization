@@ -1,6 +1,7 @@
 module Force exposing
     ( Entity, entity, simulation, State, isCompleted, reheat, iterations, computeSimulation, tick
     , Force, center, links, customLinks, manyBody, manyBodyStrength, customManyBody
+    , containment, impregnableContainment
     )
 
 {-| This module implements a velocity Verlet numerical integrator for simulating physical forces on particles.
@@ -25,8 +26,10 @@ In the domain of information visualization, physical simulations are useful for 
 
 -}
 
+import BoundingBox2d exposing (BoundingBox2d)
 import Dict exposing (Dict)
 import Force.ManyBody as ManyBody
+import Rectangle2d exposing (Rectangle2d)
 
 
 {-| Force needs to compute and update positions and velocities on any objects that it is simulating.
@@ -165,6 +168,97 @@ applyForce alpha force entities =
             --Debug.crash "not implemented"
             entities
 
+        Containment strength buffer boundingBox2d ->
+            let
+                { minX, maxX, minY, maxY } =
+                    BoundingBox2d.extrema boundingBox2d
+
+                bufferX =
+                    buffer * (maxX - maxY)
+
+                bufferY =
+                    buffer * (maxY - minY)
+
+                strength_ =
+                    strength * strength
+
+                contain ( id, ent ) =
+                    (if ent.x < minX + bufferX && ent.x >= minX && ent.vx < 0 then
+                        { ent | vx = ent.vx + (strength_ * (ent.x - minX) * alpha) }
+
+                     else if ent.x > maxX - bufferX && ent.x <= maxX then
+                        { ent | vx = ent.vx - (strength_ * (maxX - ent.x) * alpha) }
+
+                     else
+                        ent
+                    )
+                        |> (\ent_ ->
+                                if ent_.y < minY + bufferY && ent_.y >= minY then
+                                    { ent_ | vy = ent.vy + (strength_ * (ent.y - minY) * alpha) }
+
+                                else if ent_.y > maxY - bufferY && ent_.y <= maxY then
+                                    { ent_ | vy = ent.vy - (strength_ * (maxY - ent.y) * alpha) }
+
+                                else
+                                    ent_
+                           )
+                        |> Tuple.pair id
+            in
+            entities
+                |> Dict.toList
+                |> List.map contain
+                |> Dict.fromList
+
+        ImpregnableContainment bounceFactor buffer boundingBox2d ->
+            let
+                { minX, maxX, minY, maxY } =
+                    BoundingBox2d.extrema boundingBox2d
+
+                bufferX =
+                    buffer * (maxX - maxY)
+
+                bufferY =
+                    buffer * (maxY - minY)
+
+                contain ( id, ent ) =
+                    (if ent.x < minX + bufferX && ent.x >= minX && ent.vx < 0 then
+                        { ent | vx = -ent.vx * bounceFactor * alpha }
+
+                     else if ent.x > maxX - bufferX && ent.x <= maxX && ent.vx > 0 then
+                        { ent | vx = -ent.vx * bounceFactor * alpha }
+
+                     else if ent.x < minX then
+                        { ent | x = minX + bufferX }
+
+                     else if ent.x > maxX then
+                        { ent | x = maxX - bufferX }
+
+                     else
+                        ent
+                    )
+                        |> (\ent_ ->
+                                if ent_.y < minY + bufferY && ent_.y >= minY && ent_.vy < 0 then
+                                    { ent_ | vy = -ent.vy * bounceFactor * alpha }
+
+                                else if ent_.y > maxY - bufferY && ent_.y <= maxY && ent_.vy > 0 then
+                                    { ent_ | vy = -ent.vy * bounceFactor * alpha }
+
+                                else if ent_.y < minY then
+                                    { ent_ | y = minY + bufferX }
+
+                                else if ent_.y > maxY then
+                                    { ent_ | y = maxY - bufferY }
+
+                                else
+                                    ent_
+                           )
+                        |> Tuple.pair id
+            in
+            entities
+                |> Dict.toList
+                |> List.map contain
+                |> Dict.fromList
+
 
 nTimes : (a -> a) -> Int -> a -> a
 nTimes fn times input =
@@ -283,6 +377,8 @@ type Force comparable
     | Collision Float (Dict comparable CollisionParam)
     | Links Int (List (LinkParam comparable))
     | ManyBody Float (Dict comparable Float)
+    | Containment Float Float BoundingBox2d
+    | ImpregnableContainment Float Float BoundingBox2d
     | X (Dict comparable DirectionalParam)
     | Y (Dict comparable DirectionalParam)
 
@@ -377,3 +473,13 @@ customLinks iters list =
                 }
             )
         |> Links iters
+
+
+containment : Float -> Float -> BoundingBox2d -> Force comparable
+containment strength buffer boundingBox2d =
+    Containment strength buffer boundingBox2d
+
+
+impregnableContainment : Float -> Float -> BoundingBox2d -> Force comparable
+impregnableContainment bounceFactor buffer boundingBox2d =
+    ImpregnableContainment bounceFactor buffer boundingBox2d

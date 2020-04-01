@@ -1,4 +1,15 @@
-module SampleData exposing (CrimeRate, Gender(..), Population, crimeRates, miserablesGraph, norwegianCarSales, norwegianCarSalesMiddlePlayers, populationMinnesota1850, timeSeries)
+module SampleData exposing
+    ( CrimeRate
+    , Gender(..)
+    , Population
+    , crimeRates
+    , miserablesGraph
+    , norwegianCarSales
+    , norwegianCarSalesMiddlePlayers
+    , populationMinnesota1850
+    , smallGraph
+    , timeSeries
+    )
 
 import Dict exposing (Dict)
 import Graph
@@ -105,6 +116,24 @@ populationMinnesota1850 =
     , Population 1850 90 M 5259
     , Population 1850 90 F 6569
     ]
+
+
+smallGraph =
+    Graph.fromNodeLabelsAndEdgePairs
+        (List.range 1 30 |> List.map String.fromInt)
+        []
+
+
+
+--Graph.fromNodeLabelsAndEdgePairs
+--    [ "Sun", "InnerCentroid", "InnerCentroid", "InnerCentroid", "InnerCentroid", "InnerCentroid"
+--      , "OuterCentroid", "OuterCentroid", "OuterCentroid", "OuterCentroid", "OuterCentroid" ]
+--    [ ( 0, 1 )
+--    , ( 0, 2 ), ( 0, 3 )
+--    , ( 0, 4 )
+--    , ( 0, 5 )
+--    , (1, 6), (2, 7), (3, 8), (4, 9), (5, 10)
+--     ]
 
 
 miserablesGraph =
