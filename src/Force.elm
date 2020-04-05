@@ -1,7 +1,7 @@
 module Force exposing
     ( Entity, entity, simulation, State, isCompleted, reheat, iterations, computeSimulation, tick
-    , Force, center, links, customLinks, manyBody, manyBodyStrength, customManyBody
-    , containment, impregnableContainment
+    , Force(..), center, links, customLinks, manyBody, manyBodyStrength, customManyBody
+    , containment
     )
 
 {-| This module implements a velocity Verlet numerical integrator for simulating physical forces on particles.
@@ -28,8 +28,9 @@ In the domain of information visualization, physical simulations are useful for 
 
 import BoundingBox2d exposing (BoundingBox2d)
 import Dict exposing (Dict)
+import Force.Container exposing (Container(..))
 import Force.ManyBody as ManyBody
-import Rectangle2d exposing (Rectangle2d)
+import Point2d
 
 
 {-| Force needs to compute and update positions and velocities on any objects that it is simulating.
@@ -168,91 +169,93 @@ applyForce alpha force entities =
             --Debug.crash "not implemented"
             entities
 
-        Containment strength buffer boundingBox2d ->
+        Containment strength buffer impermeable (Rectangle boundingBox2d) ->
             let
                 { minX, maxX, minY, maxY } =
                     BoundingBox2d.extrema boundingBox2d
 
                 bufferX =
-                    buffer * (maxX - maxY)
+                    buffer * (maxX - minX) / 2
 
                 bufferY =
-                    buffer * (maxY - minY)
+                    buffer * (maxY - minY) / 2
 
-                strength_ =
-                    strength * strength
-
+                contain : ( comparable, Entity comparable a ) -> ( comparable, Entity comparable a )
                 contain ( id, ent ) =
-                    (if ent.x < minX + bufferX && ent.x >= minX && ent.vx < 0 then
-                        { ent | vx = ent.vx + (strength_ * (ent.x - minX) * alpha) }
+                    let
+                        isInBufferLeft =
+                            round ent.x <= round (minX + bufferX) && round ent.x >= round minX
 
-                     else if ent.x > maxX - bufferX && ent.x <= maxX then
-                        { ent | vx = ent.vx - (strength_ * (maxX - ent.x) * alpha) }
+                        isInBufferRight =
+                            round ent.x >= round (maxX - bufferX) && round ent.x <= round maxX
 
-                     else
-                        ent
-                    )
-                        |> (\ent_ ->
-                                if ent_.y < minY + bufferY && ent_.y >= minY then
-                                    { ent_ | vy = ent.vy + (strength_ * (ent.y - minY) * alpha) }
+                        isInBufferTop =
+                            round ent.y <= round (minY + bufferY) && round ent.y >= round minY
 
-                                else if ent_.y > maxY - bufferY && ent_.y <= maxY then
-                                    { ent_ | vy = ent.vy - (strength_ * (maxY - ent.y) * alpha) }
+                        isInBufferBottom =
+                            round ent.y >= round (maxY - bufferY) && round ent.y <= round maxY
 
-                                else
-                                    ent_
-                           )
-                        |> Tuple.pair id
-            in
-            entities
-                |> Dict.toList
-                |> List.map contain
-                |> Dict.fromList
+                        isOutsideBufferLeft =
+                            ent.x <= minX
 
-        ImpregnableContainment bounceFactor buffer boundingBox2d ->
-            let
-                { minX, maxX, minY, maxY } =
-                    BoundingBox2d.extrema boundingBox2d
+                        isOutsideBufferRight =
+                            ent.x >= maxX
 
-                bufferX =
-                    buffer * (maxX - maxY)
+                        inBoundingBox =
+                            BoundingBox2d.contains (Point2d.fromCoordinates ( ent.x, ent.y )) boundingBox2d
+                    in
+                    if BoundingBox2d.contains (Point2d.fromCoordinates ( ent.x, ent.y )) boundingBox2d then
+                        (if isInBufferLeft then
+                            { ent | vx = ent.vx + (strength * (bufferX - (ent.x - minX) + 1)) }
 
-                bufferY =
-                    buffer * (maxY - minY)
+                         else if isInBufferRight then
+                            { ent | vx = ent.vx - (strength * (bufferX - (maxX - ent.x) + 1)) }
+                            --  else if isOutsideBufferLeft && impermeable then
+                            --     { ent | x = minX + bufferX }
+                            --  else if isOutsideBufferRight && impermeable then
+                            --     { ent | x = maxX - bufferX }
 
-                contain ( id, ent ) =
-                    (if ent.x < minX + bufferX && ent.x >= minX && ent.vx < 0 then
-                        { ent | vx = -ent.vx * bounceFactor * alpha }
+                         else
+                            ent
+                        )
+                            |> (\ent_ ->
+                                    if isInBufferTop then
+                                        { ent_ | vy = ent.vy + (strength * (bufferY - (ent.y - minY) + 1)) }
 
-                     else if ent.x > maxX - bufferX && ent.x <= maxX && ent.vx > 0 then
-                        { ent | vx = -ent.vx * bounceFactor * alpha }
+                                    else if isInBufferBottom then
+                                        { ent_ | vy = ent.vy - (strength * (bufferY - (maxY - ent.y) + 1)) }
+                                        -- else if ent_.y < minY && impermeable then
+                                        --     { ent_ | y = minY + bufferX }
+                                        -- else if ent_.y > maxY && impermeable then
+                                        --     { ent_ | y = maxY - bufferY }
 
-                     else if ent.x < minX then
-                        { ent | x = minX + bufferX }
+                                    else
+                                        ent_
+                               )
+                            |> (\ent_ ->
+                                    if impermeable then
+                                        if ent.vx > maxX - ent.x then
+                                            { ent | x = maxX, vx = -ent.vx * strength }
 
-                     else if ent.x > maxX then
-                        { ent | x = maxX - bufferX }
+                                        else if ent.vx > ent.x - minX then
+                                            { ent | x = minX, vx = -ent.vx * strength }
 
-                     else
-                        ent
-                    )
-                        |> (\ent_ ->
-                                if ent_.y < minY + bufferY && ent_.y >= minY && ent_.vy < 0 then
-                                    { ent_ | vy = -ent.vy * bounceFactor * alpha }
+                                        else if ent.vy > maxY - ent.y then
+                                            { ent | y = maxY, vy = -ent.vy * strength }
 
-                                else if ent_.y > maxY - bufferY && ent_.y <= maxY && ent_.vy > 0 then
-                                    { ent_ | vy = -ent.vy * bounceFactor * alpha }
+                                        else if ent.vy > ent.y - minY then
+                                            { ent | y = minY, vy = -ent.vy * strength }
 
-                                else if ent_.y < minY then
-                                    { ent_ | y = minY + bufferX }
+                                        else
+                                            ent_
 
-                                else if ent_.y > maxY then
-                                    { ent_ | y = maxY - bufferY }
+                                    else
+                                        ent_
+                               )
+                            |> Tuple.pair id
 
-                                else
-                                    ent_
-                           )
-                        |> Tuple.pair id
+                    else
+                        Tuple.pair id ent
             in
             entities
                 |> Dict.toList
@@ -377,8 +380,7 @@ type Force comparable
     | Collision Float (Dict comparable CollisionParam)
     | Links Int (List (LinkParam comparable))
     | ManyBody Float (Dict comparable Float)
-    | Containment Float Float BoundingBox2d
-    | ImpregnableContainment Float Float BoundingBox2d
+    | Containment Float Float Bool Container
     | X (Dict comparable DirectionalParam)
     | Y (Dict comparable DirectionalParam)
 
@@ -475,11 +477,6 @@ customLinks iters list =
         |> Links iters
 
 
-containment : Float -> Float -> BoundingBox2d -> Force comparable
-containment strength buffer boundingBox2d =
-    Containment strength buffer boundingBox2d
-
-
-impregnableContainment : Float -> Float -> BoundingBox2d -> Force comparable
-impregnableContainment bounceFactor buffer boundingBox2d =
-    ImpregnableContainment bounceFactor buffer boundingBox2d
+containment : Float -> Float -> Bool -> BoundingBox2d -> Force comparable
+containment strength buffer impermeable boundingBox2d =
+    Containment strength buffer impermeable (Rectangle boundingBox2d)

@@ -120,7 +120,7 @@ populationMinnesota1850 =
 
 smallGraph =
     Graph.fromNodeLabelsAndEdgePairs
-        (List.range 1 30 |> List.map String.fromInt)
+        (List.range 0 7 |> List.map String.fromInt)
         []
 
 

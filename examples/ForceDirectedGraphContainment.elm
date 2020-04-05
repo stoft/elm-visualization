@@ -12,6 +12,7 @@ import Browser
 import Browser.Events
 import Color
 import Force exposing (State)
+import Force.Container exposing (Container(..))
 import Graph exposing (Edge, Graph, Node, NodeContext, NodeId)
 import Html
 import Html.Events exposing (on)
@@ -20,10 +21,10 @@ import Json.Decode as Decode
 import SampleData exposing (miserablesGraph, smallGraph)
 import Time
 import TypedSvg exposing (circle, g, line, rect, svg, title)
-import TypedSvg.Attributes exposing (class, fill, stroke, viewBox)
+import TypedSvg.Attributes exposing (class, fill, stroke, viewBox, fillOpacity)
 import TypedSvg.Attributes.InPx exposing (cx, cy, height, r, rx, ry, strokeWidth, width, x, x1, x2, y, y1, y2)
 import TypedSvg.Core exposing (Attribute, Svg, text)
-import TypedSvg.Types exposing (Paint(..))
+import TypedSvg.Types exposing (Paint(..), Opacity(..))
 
 
 w : Float
@@ -33,7 +34,7 @@ w =
 
 h : Float
 h =
-    504
+    1200
 
 
 type Msg
@@ -63,10 +64,24 @@ type alias Entity =
 
 initializeNode : NodeContext String () -> NodeContext Entity ()
 initializeNode ctx =
-    { node = { label = Force.entity ctx.node.id ctx.node.label, id = ctx.node.id }
-    , incoming = ctx.incoming
-    , outgoing = ctx.outgoing
-    }
+    let
+        ent : Int -> { x : Float, y : Float, vx : Float, vy : Float, id : NodeId, value : String }
+        ent id =
+            { x = 150
+            , y = 100 + (toFloat id * 100)
+            , vx = 75
+            , vy = 0
+            , id = id
+            , value = String.fromInt id
+            }
+    in
+    ent ctx.node.id
+        |> (\entity ->
+                { node = { label = entity, id = ctx.node.id }
+                , incoming = ctx.incoming
+                , outgoing = ctx.outgoing
+                }
+           )
 
 
 init : () -> ( Model, Cmd Msg )
@@ -90,30 +105,24 @@ init _ =
             , strength = Nothing
             }
 
-        setBodyStrength node =
-            if node == 0 then
-                ( node, -200 )
-
-            else
-                ( node, -200 )
-
-        forces =
-            [ --Force.customLinks 50 <| List.map link <| Graph.edges graph
-              Force.center (w / 2) (h / 2)
-
-            --, Force.customManyBody -1 <| List.map (.id >> setBodyStrength) <| Graph.nodes graph
-            , Force.manyBodyStrength -20 <| (Graph.nodes graph |> List.map .id)
-            , Force.containment 1.0 0.1 initContainment
-
-            --, Force.impregnableContainment 5.0 0.05 initContainment
-            ]
+        forces = initForces 
     in
     ( Model Nothing graph (Force.simulation forces), Cmd.none )
 
+initForces =
+    [ Force.containment 0.0 0.0 False (boundingBox 0)
+    , Force.containment 5.0 0.1 False (boundingBox 1)
+    , Force.containment 5.0 0.3 False (boundingBox 2)
+    , Force.containment 10.0 0.1 False (boundingBox 3)
+    , Force.containment 10.0 0.3 False (boundingBox 4)
+    , Force.containment -5.0 0.1 False (boundingBox 5)
+    , Force.containment 5.0 0.0 True (boundingBox 6)
+    , Force.containment 10.0 0.0 True (boundingBox 7)
+    ] 
 
-initContainment : BoundingBox2d
-initContainment =
-    BoundingBox2d.fromExtrema { minX = 100, maxX = w - 100, minY = 100, maxY = h - 100 }
+boundingBox : Float -> BoundingBox2d
+boundingBox y =
+    BoundingBox2d.fromExtrema { minX = 50, maxX = 250, minY = (y * 100) + 50, maxY = ((y + 1) * 100) + 50 }
 
 
 updateNode : ( Float, Float ) -> NodeContext Entity () -> NodeContext Entity ()
@@ -150,17 +159,6 @@ update msg ({ drag, graph, simulation } as model) =
             let
                 ( newState, list ) =
                     Force.tick simulation <| List.map .label <| Graph.nodes graph
-
-                newlist =
-                    list
-                        |> List.map
-                            (\ent ->
-                                if ent.id == 0 then
-                                    { ent | x = w / 2, y = h / 2 }
-
-                                else
-                                    ent
-                            )
             in
             case drag of
                 Nothing ->
@@ -265,40 +263,77 @@ nodeElement node =
         ]
 
 
-viewBoundingBox =
+viewForce strength buffer impermeable boundingBox_ =
     let
         { minX, minY, maxX, maxY } =
-            BoundingBox2d.extrema initContainment
+            BoundingBox2d.extrema boundingBox_
 
         width_ =
             maxX - minX
 
         height_ =
             maxY - minY
+        
+        boolToString bool =
+            case bool of
+                True -> "True"
+                False -> "False"
     in
-    rect
-        [ x minX
-        , y minY
-        , width width_
-        , height height_
-        , stroke <| Paint <| Color.black
-        , strokeWidth 1
-        , fill <| Paint <| Color.white
-        ]
-        []
+    g [] [
+        rect 
+            [ x (minX + width_ * buffer / 2)
+            , y (minY + height_ * buffer / 2)
+            , width (width_ - width_ * buffer)
+            , height (height_ - height_ * buffer)
+            , stroke <| Paint <| Color.grey
+            , strokeWidth 1
+            , fill <| Paint <| Color.white
+            ]
+            []
+        , rect
+            [ x minX
+            , y minY
+            , width width_
+            , height height_
+            , stroke <| Paint <| Color.black
+            , strokeWidth 1
+            , fill <| Paint <| Color.white
+            , fillOpacity <| Opacity <| 0
+            ]
+            []
+        ,TypedSvg.text_
+            [ x ((minX + 10))
+            , y (minY + 10)
+            , fill <| Paint <| Color.black
+            , TypedSvg.Attributes.InPx.fontSize 10
+            -- , TypedSvg.Attributes.textAnchor TypedSvg.Types.AnchorMiddle
+            ]
+            [ text ("Strength: " ++ String.fromFloat strength ++
+                    ", Buffer: " ++ String.fromFloat buffer ++
+                    ", Impermeable: " ++ boolToString impermeable) ] 
+    ]
 
+viewForces : List (Svg Msg)
+viewForces =
+    List.foldl (\force list -> 
+        case force of 
+            (Force.Containment strength buffer impermeable (Rectangle bb)) ->
+                viewForce strength buffer impermeable bb :: list 
+            _ -> list
+        ) [] initForces
+        |> List.reverse
 
 view : Model -> Svg Msg
 view model =
     svg [ viewBox 0 0 w h ]
-        [ viewBoundingBox
-        , Graph.edges model.graph
+        (viewForces ++ [ 
+         Graph.edges model.graph
             |> List.map (linkElement model.graph)
             |> g [ class [ "links" ] ]
         , Graph.nodes model.graph
             |> List.map nodeElement
             |> g [ class [ "nodes" ] ]
-        ]
+        ])
 
 
 main : Program () Model Msg
