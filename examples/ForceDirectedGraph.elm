@@ -45,7 +45,7 @@ type Msg
 type alias Model =
     { drag : Maybe Drag
     , graph : Graph Entity ()
-    , simulation : Force.State NodeId
+    , simulation : Force.State NodeId Entity
     }
 
 

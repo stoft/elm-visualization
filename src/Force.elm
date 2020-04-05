@@ -1,6 +1,7 @@
 module Force exposing
     ( Entity, entity, simulation, State, isCompleted, reheat, iterations, computeSimulation, tick
     , Force, center, links, customLinks, manyBody, manyBodyStrength, customManyBody
+    , CustomApplyForce, customForce
     )
 
 {-| This module implements a velocity Verlet numerical integrator for simulating physical forces on particles.
@@ -64,7 +65,7 @@ initialAngle =
 Note that this is fairly computationally expensive and may freeze the UI for a while if the dataset is large.
 
 -}
-computeSimulation : State comparable -> List (Entity comparable a) -> List (Entity comparable a)
+computeSimulation : State comparable a -> List (Entity comparable a) -> List (Entity comparable a)
 computeSimulation state entities =
     if isCompleted state then
         entities
@@ -98,7 +99,13 @@ entity index a =
     }
 
 
-applyForce : Float -> Force comparable -> Dict comparable (Entity comparable a) -> Dict comparable (Entity comparable a)
+{-| A custom apply force function that allows applying a custom force during a simulation.
+-}
+type alias CustomApplyForce comparable a =
+    Float -> Dict comparable (Entity comparable a) -> Dict comparable (Entity comparable a)
+
+
+applyForce : Float -> Force comparable a -> Dict comparable (Entity comparable a) -> Dict comparable (Entity comparable a)
 applyForce alpha force entities =
     case force of
         Center x y ->
@@ -165,6 +172,9 @@ applyForce alpha force entities =
             --Debug.crash "not implemented"
             entities
 
+        CustomForce applyForce_ ->
+            applyForce_ alpha entities
+
 
 nTimes : (a -> a) -> Int -> a -> a
 nTimes fn times input =
@@ -177,7 +187,7 @@ nTimes fn times input =
 
 {-| Advances the simulation a single tick, returning both updated entities and a new State of the simulation.
 -}
-tick : State comparable -> List (Entity comparable a) -> ( State comparable, List (Entity comparable a) )
+tick : State comparable a -> List (Entity comparable a) -> ( State comparable a, List (Entity comparable a) )
 tick (State state) nodes =
     let
         alpha =
@@ -202,7 +212,7 @@ tick (State state) nodes =
 
 {-| Create a new simulation by passing a list of forces.
 -}
-simulation : List (Force comparable) -> State comparable
+simulation : List (Force comparable a) -> State comparable a
 simulation forces =
     State
         { forces = forces
@@ -220,7 +230,7 @@ Lower number of iterations will produce a layout quicker, but risk getting stuck
 longer, but typically produce better results.
 
 -}
-iterations : Int -> State comparable -> State comparable
+iterations : Int -> State comparable a -> State comparable a
 iterations iters (State config) =
     State { config | alphaDecay = 1 - config.minAlpha ^ (1 / toFloat iters) }
 
@@ -228,23 +238,23 @@ iterations iters (State config) =
 {-| Resets the computation. This is useful if you need to change the parameters at runtime, such as the position or
 velocity of nodes during a drag operation.
 -}
-reheat : State comparable -> State comparable
+reheat : State comparable a -> State comparable a
 reheat (State config) =
     State { config | alpha = 1.0 }
 
 
 {-| Has the simulation stopped?
 -}
-isCompleted : State comparable -> Bool
+isCompleted : State comparable a -> Bool
 isCompleted (State { alpha, minAlpha }) =
     alpha <= minAlpha
 
 
 {-| This holds internal state of the simulation.
 -}
-type State comparable
+type State comparable a
     = State
-        { forces : List (Force comparable)
+        { forces : List (Force comparable a)
         , alpha : Float
         , minAlpha : Float
         , alphaDecay : Float
@@ -278,13 +288,14 @@ type alias DirectionalParam =
 as electrical charge or gravity, or it can resolve a geometric constraint, such as keeping nodes within a bounding box
 or keeping linked nodes a fixed distance apart.
 -}
-type Force comparable
+type Force comparable a
     = Center Float Float
     | Collision Float (Dict comparable CollisionParam)
     | Links Int (List (LinkParam comparable))
     | ManyBody Float (Dict comparable Float)
     | X (Dict comparable DirectionalParam)
     | Y (Dict comparable DirectionalParam)
+    | CustomForce (CustomApplyForce comparable a)
 
 
 {-| The centering force translates nodes uniformly so that the mean position of all nodes (the center of mass) is at
@@ -292,7 +303,7 @@ the given position ⟨x,y⟩. This force modifies the positions of nodes on each
 as doing so would typically cause the nodes to overshoot and oscillate around the desired center. This force helps keep
 nodes in the center of the viewport, and it does not distort their relative positions.
 -}
-center : Float -> Float -> Force comparable
+center : Float -> Float -> Force comparable a
 center =
     Center
 
@@ -306,14 +317,14 @@ to it.
 The default strength is -30 simulating a repulsing charge.
 
 -}
-manyBody : List comparable -> Force comparable
+manyBody : List comparable -> Force comparable a
 manyBody =
     manyBodyStrength -30
 
 
 {-| This allows you to specify the strength of the many-body force.
 -}
-manyBodyStrength : Float -> List comparable -> Force comparable
+manyBodyStrength : Float -> List comparable -> Force comparable a
 manyBodyStrength strength =
     customManyBody 0.9 << List.map (\key -> ( key, strength ))
 
@@ -327,7 +338,7 @@ To accelerate computation, this force implements the [Barnes–Hut approximation
 This function also allows you to set the force strength individually on each node.
 
 -}
-customManyBody : Float -> List ( comparable, Float ) -> Force comparable
+customManyBody : Float -> List ( comparable, Float ) -> Force comparable a
 customManyBody theta =
     Dict.fromList >> ManyBody theta
 
@@ -341,14 +352,14 @@ present link, according to the formule: `1 / min (count souce) (count target)` w
 links connected to those nodes.
 
 -}
-links : List ( comparable, comparable ) -> Force comparable
+links : List ( comparable, comparable ) -> Force comparable a
 links =
     List.map (\( source, target ) -> { source = source, target = target, distance = 30, strength = Nothing }) >> customLinks 1
 
 
 {-| Allows you to specify the link distance and optionally the strength. You must also specify the iterations count (the default in `links` is 1). Increasing the number of iterations greatly increases the rigidity of the constraint and is useful for complex structures such as lattices, but also increases the runtime cost to evaluate the force.
 -}
-customLinks : Int -> List { source : comparable, target : comparable, distance : Float, strength : Maybe Float } -> Force comparable
+customLinks : Int -> List { source : comparable, target : comparable, distance : Float, strength : Maybe Float } -> Force comparable a
 customLinks iters list =
     let
         counts =
@@ -377,3 +388,10 @@ customLinks iters list =
                 }
             )
         |> Links iters
+
+
+{-| Allows you to specify a custom force such as a geometric constraint.
+-}
+customForce : CustomApplyForce comparable a -> Force comparable a
+customForce =
+    CustomForce
